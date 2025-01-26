@@ -11,7 +11,7 @@ private:
     DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void*, Unknown_In_ZTemplateEntityBlueprintFactory_ctor, void*, void*);
     
     void SceneLoadCrashHandler();
-    void LogInvalidSceneTemps(ZRuntimeResourceID resourceID, ZString ridPath);
+    bool LogInvalidSceneTemps(ZRuntimeResourceID resourceID, ZString ridPath, std::vector<std::string>* outputMessageList);
 
     int mostRecentTemplate = -1;
 };

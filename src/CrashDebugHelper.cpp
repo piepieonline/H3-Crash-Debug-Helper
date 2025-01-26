@@ -7,6 +7,8 @@
 #include <Glacier/ZScene.h>
 #include <Glacier/ZModule.h>
 
+extern void FlushLoggers();
+
 void CrashDebugHelper::OnEngineInitialized() {
     Logger::Info("CrashDebugHelper has been initialized!");
 
@@ -30,22 +32,36 @@ DEFINE_PLUGIN_DETOUR(CrashDebugHelper, void, OnLoadScene, ZEntitySceneContext* t
 
 void CrashDebugHelper::SceneLoadCrashHandler()
 {
-    Logger::Error("SCENE OR BRICK CRASH");
-    LogInvalidSceneTemps(
+    bool wasErrorFound = false;
+    auto messageList = new std::vector<std::string>();
+
+    if (LogInvalidSceneTemps(
         Globals::Hitman5Module->m_pEntitySceneContext->m_SceneConfig.m_ridSceneFactory,
-        Globals::Hitman5Module->m_pEntitySceneContext->m_sceneData.m_sceneName
-    );
+        Globals::Hitman5Module->m_pEntitySceneContext->m_sceneData.m_sceneName,
+        messageList
+    )) wasErrorFound = true;
     for (int i = 0; i < Globals::Hitman5Module->m_pEntitySceneContext->m_SceneConfig.m_aAdditionalBrickFactoryRIDs.size(); i++)
     {
-        LogInvalidSceneTemps(
+        if (LogInvalidSceneTemps(
             Globals::Hitman5Module->m_pEntitySceneContext->m_SceneConfig.m_aAdditionalBrickFactoryRIDs[i],
-            Globals::Hitman5Module->m_pEntitySceneContext->m_sceneData.m_sceneBricks[i]
-        );
+            Globals::Hitman5Module->m_pEntitySceneContext->m_sceneData.m_sceneBricks[i],
+            messageList
+        )) wasErrorFound = true;
     }
-    Logger::Flush();
+
+    if (wasErrorFound)
+    {
+        Logger::Error("SCENE OR BRICK CRASH");
+        for (auto message : *messageList)
+        {
+            Logger::Info("{}", message);
+        }
+    }
+
+    FlushLoggers();
 }
 
-void CrashDebugHelper::LogInvalidSceneTemps(ZRuntimeResourceID resourceID, ZString ridPath)
+bool CrashDebugHelper::LogInvalidSceneTemps(ZRuntimeResourceID resourceID, ZString ridPath, std::vector<std::string>* outputMessageList)
 {
     TResourcePtr<ZTemplateEntityBlueprintFactory> resPtr;
     Globals::ResourceManager->GetResourcePtr(resPtr, resourceID, 0);
@@ -54,11 +70,13 @@ void CrashDebugHelper::LogInvalidSceneTemps(ZRuntimeResourceID resourceID, ZStri
 
     if (resInfo.status == EResourceStatus::RESOURCE_STATUS_FAILED)
     {
-        Logger::Error("CRASH: Failed to load: {} (TEMP: {:08X}{:08X})", ridPath, resInfo.rid.m_IDHigh, resInfo.rid.m_IDLow);
+        outputMessageList->push_back(std::format("CRASH: Failed to load: {} (TEMP: {:08X}{:08X})", ridPath.c_str(), resInfo.rid.m_IDHigh, resInfo.rid.m_IDLow));
+        return true;
     }
     else
     {
-        Logger::Info("Loaded: {} (TEMP: {:08X}{:08X})", ridPath, resInfo.rid.m_IDHigh, resInfo.rid.m_IDLow);
+        outputMessageList->push_back(std::format("Loaded: {} (TEMP: {:08X}{:08X})", ridPath.c_str(), resInfo.rid.m_IDHigh, resInfo.rid.m_IDLow));
+        return false;
     }
 }
 
@@ -78,22 +96,11 @@ DEFINE_PLUGIN_DETOUR(CrashDebugHelper, void*, Unknown_In_ZTemplateEntityBlueprin
     {
         if (mostRecentTemplate == 0)
         {
-            auto entManager = Globals::EntityManager->m_pContext;
-
-            for (auto& s_Brick : entManager->m_aLoadedBricks)
-            {
-                if (s_Brick.runtimeResourceID != ResId<"[assembly:/_sdk/hitmen.brick].pc_entitytype">)
-                    continue;
-            }
-
-            auto mainSceneResourceId = ResId<"[assembly:/_pro/scenes/missions/skunk/scene_skunk_mild_solitaire.entity].pc_entitytemplate">;
-            auto brickResourceId = ResId<"[assembly:/_pro/scenes/missions/skunk/ass_night_mild.brick].pc_entitytype">;
-
             auto entity = reinterpret_cast<STemplateBlueprintSubEntity*>((uintptr_t*)((char*)a2 - 0x28));
             auto rootEntName = factoryCall2->m_pTemplateEntityBlueprint->subEntities[factoryCall2->m_pTemplateEntityBlueprint->rootEntityIndex].entityName;
             auto rootEntId = factoryCall2->m_pTemplateEntityBlueprint->subEntities[factoryCall2->m_pTemplateEntityBlueprint->rootEntityIndex].entityId;
             Logger::Error("CRASH LIKELY: Missing entity template: {} ({:X}) - Blueprint {:08X}{:08X} (Root Entity {} ({:X}))", entity->entityName, entity->entityId, factoryCall2->m_ridResource.m_IDHigh, factoryCall2->m_ridResource.m_IDLow, rootEntName, rootEntId);
-            Logger::Flush();
+            FlushLoggers();
         }
         mostRecentTemplate = -1;
     }
