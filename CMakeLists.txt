@@ -10,6 +10,19 @@ include(cmake/setup-zhmmodsdk.cmake)
 # Set C++ standard to C++23.
 set(CMAKE_CXX_STANDARD 23)
 
+# Set version numbers
+set(VERSION_MAJOR 1)
+set(VERSION_MINOR 0)
+set(VERSION_PATCH 0)
+set(VERSION_BUILD 0)
+
+# Configure the version.rc file
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/version.rc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/version.rc
+    @ONLY
+)
+
 # Create the CrashDebugHelper mod library.
 add_library(CrashDebugHelper SHARED
     src/CrashDebugHelper.cpp
@@ -26,6 +39,7 @@ target_link_libraries(CrashDebugHelper
     ZHMModSDK
     Microsoft::DirectX-Guids
     Microsoft::DirectX-Headers
+    Version
 )
 
 install(TARGETS CrashDebugHelper
