@@ -8,7 +8,7 @@ public:
 
 private:
     DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void, OnLoadScene, ZEntitySceneContext* th, ZSceneData& p_SceneData);
-    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void*, Unknown_In_ZTemplateEntityBlueprintFactory_ctor, void*, void*);
+    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void*, ZArray_PushBack, void*, void*);
     
     void SceneLoadCrashHandler();
     bool LogInvalidSceneTemps(ZRuntimeResourceID resourceID, ZString ridPath, std::vector<std::string>* outputMessageList);
