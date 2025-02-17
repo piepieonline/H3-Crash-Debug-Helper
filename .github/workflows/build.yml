@@ -27,12 +27,16 @@ jobs:
         arch: x64
 
     - name: Build and install debug
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         cmake --preset x64-Debug .
         cmake --build _build/x64-Debug --parallel
         cmake --install _build/x64-Debug
 
     - name: Build and install release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         cmake --preset x64-Release .
         cmake --build _build/x64-Release --parallel
