@@ -9,7 +9,7 @@ else()
         set(GITHUB_TOKEN $ENV{secrets.GITHUB_TOKEN})
         FetchContent_Declare(
             ZHMModSDK
-            URL https://api.github.com/repos/OrfeasZ/ZHMModSDK/actions/artifacts/${ZHMMODSDK_OVERRIDE}/zip
+            URL https://api.github.com/repos/OrfeasZ/ZHMModSDK/actions/artifacts/${ZHMMODSDK_ARTIFACT_ID}/zip
             HTTP_HEADER "Authorization: token GITHUB_TOKEN"
         )
     else()
