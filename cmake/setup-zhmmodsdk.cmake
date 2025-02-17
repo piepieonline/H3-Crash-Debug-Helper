@@ -5,7 +5,7 @@ else()
     include(FetchContent)
     cmake_policy(SET CMP0135 NEW)
 
-    if (DEFINED ZHMMODSDK_ARTIFACT_ID)
+    if (DEFINED ZHMMODSDK_ARTIFACT_ID AND DEFINED GITHUB_TOKEN)
         FetchContent_Declare(
             ZHMModSDK
             URL https://api.github.com/repos/OrfeasZ/ZHMModSDK/actions/artifacts/${ZHMMODSDK_ARTIFACT_ID}/zip
