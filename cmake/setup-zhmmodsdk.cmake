@@ -5,13 +5,11 @@ else()
     include(FetchContent)
     cmake_policy(SET CMP0135 NEW)
 
-    set(GITHUB_TOKEN, $ENV{GITHUB_TOKEN})
-
-    if (DEFINED ZHMMODSDK_ARTIFACT_ID AND DEFINED GITHUB_TOKEN)
+    if (DEFINED ZHMMODSDK_ARTIFACT_ID AND DEFINED ENV{GITHUB_TOKEN})
         FetchContent_Declare(
             ZHMModSDK
             URL https://api.github.com/repos/OrfeasZ/ZHMModSDK/actions/artifacts/${ZHMMODSDK_ARTIFACT_ID}/zip
-            HTTP_HEADER "Authorization: token ${GITHUB_TOKEN}"
+            HTTP_HEADER "Authorization: token $ENV{GITHUB_TOKEN}"
         )
     else()
         FetchContent_Declare(
