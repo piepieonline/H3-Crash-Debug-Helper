@@ -10,6 +10,10 @@ set(ZHMMODSDK_ARTIFACT_ID "2486868525") # Use an artifact for github actions whi
 
 include(cmake/setup-zhmmodsdk.cmake)
 
+# Add libraries
+find_package(directxtk12 CONFIG REQUIRED)
+find_package(directx-headers CONFIG REQUIRED)
+
 # Set C++ standard to C++23.
 set(CMAKE_CXX_STANDARD 23)
 
@@ -40,6 +44,7 @@ find_package(directx-headers CONFIG REQUIRED)
 
 target_link_libraries(CrashDebugHelper
     ZHMModSDK
+    Microsoft::DirectXTK12
     Microsoft::DirectX-Guids
     Microsoft::DirectX-Headers
     Version
