@@ -2,6 +2,7 @@
     "name": "crashdebughelper",
     "version": "1.0.0",
     "dependencies": [
-        "directx-headers"
+        "directx-headers",
+        "directxtk12"
     ]
 }
