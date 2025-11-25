@@ -18,11 +18,11 @@ void CrashDebugHelper::OnEngineInitialized() {
 
 // Scene Crashes
 // Invalid scene or brick is trying to load
-DEFINE_PLUGIN_DETOUR(CrashDebugHelper, void, OnLoadScene, ZEntitySceneContext* th, ZSceneData& p_SceneData) {
+DEFINE_PLUGIN_DETOUR(CrashDebugHelper, void, OnLoadScene, ZEntitySceneContext* th, SSceneInitParameters& sceneInitParams) {
     // I'd rather not use __try, but calling GetResourcePtr during scene load causes a crash... so make sure we only call it if we are crashing anyway, rather than preemptively
     __try
     {
-        p_Hook->CallOriginal(th, p_SceneData);
+        p_Hook->CallOriginal(th, sceneInitParams);
         return HookResult<void>(HookAction::Return());
     }
     __except (EXCEPTION_EXECUTE_HANDLER)

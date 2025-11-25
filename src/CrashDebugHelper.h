@@ -7,7 +7,7 @@ public:
     void OnEngineInitialized() override;
 
 private:
-    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void, OnLoadScene, ZEntitySceneContext* th, ZSceneData& p_SceneData);
+    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void, OnLoadScene, ZEntitySceneContext*, SSceneInitParameters&);
     DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void*, ZArray_PushBack, void*, void*);
     
     void SceneLoadCrashHandler();
