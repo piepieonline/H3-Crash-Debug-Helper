@@ -38,14 +38,14 @@ void CrashDebugHelper::SceneLoadCrashHandler()
 
     if (LogInvalidSceneTemps(
         Globals::Hitman5Module->m_pEntitySceneContext->m_SceneConfig.m_ridSceneFactory,
-        Globals::Hitman5Module->m_pEntitySceneContext->m_sceneData.m_sceneName,
+        Globals::Hitman5Module->m_pEntitySceneContext->m_SceneInitParameters.m_SceneResource,
         messageList
     )) wasErrorFound = true;
     for (int i = 0; i < Globals::Hitman5Module->m_pEntitySceneContext->m_SceneConfig.m_aAdditionalBrickFactoryRIDs.size(); i++)
     {
         if (LogInvalidSceneTemps(
             Globals::Hitman5Module->m_pEntitySceneContext->m_SceneConfig.m_aAdditionalBrickFactoryRIDs[i],
-            Globals::Hitman5Module->m_pEntitySceneContext->m_sceneData.m_sceneBricks[i],
+            Globals::Hitman5Module->m_pEntitySceneContext->m_SceneInitParameters.m_aAdditionalBrickResources[i],
             messageList
         )) wasErrorFound = true;
     }
