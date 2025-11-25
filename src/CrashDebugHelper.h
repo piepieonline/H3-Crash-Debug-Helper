@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Glacier/ZScene.h>
+
 #include <IPluginInterface.h>
 
 class CrashDebugHelper : public IPluginInterface {
