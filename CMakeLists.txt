@@ -4,8 +4,8 @@ project(CrashDebugHelper CXX)
 
 # Find latest version at https://github.com/OrfeasZ/ZHMModSDK/releases
 # Set ZHMMODSDK_DIR variable to a local directory to use a local copy of the ZHMModSDK.
-set(ZHMMODSDK_VER "v4.0.0-rc.1")
-set(ZHMMODSDK_ARTIFACT_ID "19663678920") # Use an artifact for github actions while it's not merged
+# set(ZHMMODSDK_VER "v4.0.0-rc.2")
+set(ZHMMODSDK_ARTIFACT_ID "4670851114") # Use an artifact for github actions while it's not merged
 # set(ZHMMODSDK_DIR "D:/Game Modding/Hitman/2021 Tools/ZHMModSDK")
 
 include(cmake/setup-zhmmodsdk.cmake)
