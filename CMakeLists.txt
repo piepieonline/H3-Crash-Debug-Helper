@@ -49,6 +49,7 @@ target_link_libraries(CrashDebugHelper
     Microsoft::DirectX-Guids
     Microsoft::DirectX-Headers
     Version
+    implot
 )
 
 install(TARGETS CrashDebugHelper
