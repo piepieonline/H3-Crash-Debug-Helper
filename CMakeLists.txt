@@ -6,7 +6,7 @@ project(CrashDebugHelper CXX)
 # Set ZHMMODSDK_DIR variable to a local directory to use a local copy of the ZHMModSDK.
 # set(ZHMMODSDK_VER "v4.0.0-rc.2")
 # DevPkg-ZHMModSDK artifact ID from the branch
-set(ZHMMODSDK_ARTIFACT_ID "4670855529") # Use an artifact for github actions while it's not merged
+set(ZHMMODSDK_ARTIFACT_ID "8651029871") # Use an artifact for github actions while it's not merged
 # set(ZHMMODSDK_DIR "D:/Game Modding/Hitman/2021 Tools/ZHMModSDK")
 
 include(cmake/setup-zhmmodsdk.cmake)
@@ -49,6 +49,7 @@ target_link_libraries(CrashDebugHelper
     Microsoft::DirectX-Guids
     Microsoft::DirectX-Headers
     Version
+    implot
 )
 
 install(TARGETS CrashDebugHelper
