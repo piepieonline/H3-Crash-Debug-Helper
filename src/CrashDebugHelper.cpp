@@ -7,13 +7,104 @@
 #include <Glacier/ZScene.h>
 #include <Glacier/ZModule.h>
 
-extern void FlushLoggers();
+#include <MinHook.h>
+
+static const char* c_ArrayPushBackPattern =
+    "\x40\x53\x57\x48\x83\xEC\x38\x48\x8B\xD9\x48\x89\x6C\x24\x58\x48\x89\x74\x24\x60\x48\x8B\xEA\x48\x8B\x71\x10\x48\x8B\xCE\x48\xC1\xE9\x3E\x80\xE1\x01\x74\x10\x48\x8B\xC6\x40\x0F\xB6\xFE\x48\xC1\xE8\x08\x0F\xB6\xD0\xEB\x24\x48\x8B\x7B\x08\x48\x8B\xD6\x48\x2B\x3B\x48\xB8\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x3F\x48\x23\xD0\x48\xC1\xFF\x03\x48\x2B\x13\x8B\xFF\x48\xC1\xFA\x03\x8B\xC2\x48\x3B\xF8";
+static const char* c_ArrayPushBackMask =
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+CrashDebugHelper* CrashDebugHelper::instance = nullptr;
+CrashDebugHelper::ZArray_PushBack_t CrashDebugHelper::originalArrayPushBack = nullptr;
+
+static void FlushLoggers()
+{
+    const auto loggers = GetLoggers();
+
+    for (size_t i = 0; i < loggers.Count; ++i)
+    {
+        loggers.Loggers[i]->flush();
+    }
+}
+
+// SDK's Util::ProcessUtils::SearchPattern clone
+static uintptr_t SearchPattern(uintptr_t baseAddress, size_t scanSize, const uint8_t* pattern, const char* mask)
+{
+    const size_t patternSize = strlen(mask);
+
+    if (patternSize <= 1 || patternSize > scanSize)
+    {
+        return 0;
+    }
+
+    const uintptr_t searchEnd = baseAddress + scanSize - patternSize;
+
+    for (uintptr_t searchAddr = baseAddress; searchAddr <= searchEnd; ++searchAddr)
+    {
+        const uint8_t* memoryPtr = reinterpret_cast<uint8_t*>(searchAddr);
+
+        bool found = true;
+
+        for (size_t i = 0; i < patternSize; ++i)
+        {
+            if (mask[i] == '?')
+            {
+                continue;
+            }
+
+            if (memoryPtr[i] != pattern[i])
+            {
+                found = false;
+                break;
+            }
+        }
+
+        if (found)
+        {
+            return searchAddr;
+        }
+    }
+
+    return 0;
+}
+
+// SDK's PatternHook clone
+static void* FindGameFunction(const char* pattern, const char* mask)
+{
+    const HMODULE module = GetModuleHandleA(nullptr);
+
+    if (module == nullptr)
+    {
+        return nullptr;
+    }
+
+    const auto* dosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(module);
+    const auto* ntHeader = reinterpret_cast<PIMAGE_NT_HEADERS>(reinterpret_cast<uintptr_t>(module) + dosHeader->e_lfanew);
+
+    const uintptr_t baseOfCode = reinterpret_cast<uintptr_t>(module) + ntHeader->OptionalHeader.BaseOfCode;
+
+    return reinterpret_cast<void*>(SearchPattern(
+        baseOfCode,
+        ntHeader->OptionalHeader.SizeOfCode,
+        reinterpret_cast<const uint8_t*>(pattern),
+        mask
+    ));
+}
+
+CrashDebugHelper::~CrashDebugHelper()
+{
+    RemoveArrayPushBackHook();
+
+    instance = nullptr;
+}
 
 void CrashDebugHelper::OnEngineInitialized() {
     Logger::Info("CrashDebugHelper has been initialized!");
 
+    instance = this;
+
     Hooks::ZEntitySceneContext_LoadScene->AddDetour(this, &CrashDebugHelper::OnLoadScene);
-    Hooks::ZArray_PushBack->AddDetour(this, &CrashDebugHelper::ZArray_PushBack);
+    InstallArrayPushBackHook();
 }
 
 // Scene Crashes
@@ -85,7 +176,78 @@ bool CrashDebugHelper::LogInvalidSceneTemps(ZRuntimeResourceID resourceID, ZStri
 // Entity Crashes
 // Unknown TEMP is referenced
 
-DEFINE_PLUGIN_DETOUR(CrashDebugHelper, void*, ZArray_PushBack, void* th, void* newData)
+void CrashDebugHelper::InstallArrayPushBackHook()
+{
+    void* target = FindGameFunction(c_ArrayPushBackPattern, c_ArrayPushBackMask);
+
+    if (target == nullptr)
+    {
+        Logger::Error("CrashDebugHelper: Could not find ZArray::push_back. Missing entity template detection is disabled - the pattern probably needs updating for this version of the game.");
+        return;
+    }
+
+    // We have our own copy of MinHook, separate from the SDK's. That's fine as long as the two never hook the same function
+    const MH_STATUS initStatus = MH_Initialize();
+
+    if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED)
+    {
+        Logger::Error("CrashDebugHelper: Could not initialize MinHook. Error code: {}.", static_cast<int>(initStatus));
+        return;
+    }
+
+    MH_STATUS status = MH_CreateHook(
+        target,
+        reinterpret_cast<LPVOID>(&CrashDebugHelper::ZArray_PushBackDetour),
+        reinterpret_cast<LPVOID*>(&originalArrayPushBack)
+    );
+
+    if (status != MH_OK)
+    {
+        Logger::Error("CrashDebugHelper: Could not create the ZArray::push_back hook at {}. Error code: {}.", fmt::ptr(target), static_cast<int>(status));
+        MH_Uninitialize();
+        return;
+    }
+
+    status = MH_EnableHook(target);
+
+    if (status != MH_OK)
+    {
+        Logger::Error("CrashDebugHelper: Could not enable the ZArray::push_back hook at {}. Error code: {}.", fmt::ptr(target), static_cast<int>(status));
+        MH_RemoveHook(target);
+        MH_Uninitialize();
+        return;
+    }
+
+    arrayPushBackTarget = target;
+
+    Logger::Debug("CrashDebugHelper: Hooked ZArray::push_back at {}.", fmt::ptr(target));
+}
+
+void CrashDebugHelper::RemoveArrayPushBackHook()
+{
+    if (arrayPushBackTarget == nullptr)
+    {
+        return;
+    }
+
+    MH_DisableHook(arrayPushBackTarget);
+    MH_RemoveHook(arrayPushBackTarget);
+    MH_Uninitialize();
+
+    arrayPushBackTarget = nullptr;
+}
+
+void* __fastcall CrashDebugHelper::ZArray_PushBackDetour(void* th, void* newData)
+{
+    if (instance != nullptr)
+    {
+        instance->OnArrayPushBack(th, newData);
+    }
+
+    return originalArrayPushBack(th, newData);
+}
+
+void CrashDebugHelper::OnArrayPushBack(void* th, void* newData)
 {
     // Calculated in the middle of a function, no previous function call makes it easy to associate the null constructor with the template
     // This isn't clean... but it works
@@ -111,8 +273,6 @@ DEFINE_PLUGIN_DETOUR(CrashDebugHelper, void*, ZArray_PushBack, void* th, void* n
         }
         mostRecentTemplate = -1;
     }
-
-    return HookResult<void*>(HookAction::Continue());
 }
 
 DECLARE_ZHM_PLUGIN(CrashDebugHelper);

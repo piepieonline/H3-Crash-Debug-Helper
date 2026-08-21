@@ -3,6 +3,7 @@
     "version": "1.0.0",
     "dependencies": [
         "directx-headers",
-        "directxtk12"
+        "directxtk12",
+        "minhook"
     ]
 }
