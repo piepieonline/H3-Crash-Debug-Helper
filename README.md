@@ -3,8 +3,10 @@
 A Hitman SDK mod that adds additional error messages to help modders track down sources of game crashes.
 
 Current additional error messages are logged when:
-* An scene or brick file is missing when loading a scene
-* A referenced entity TEMP is not found when loading a scene
+
+- An scene or brick file is missing when loading a scene
+- A referenced entity TEMP is not found when loading a scene
+- A scene creates more render primitives than the engine has slots for. (The count is also reported once each scene finishes loading)
 
 ## Installation Instructions
 

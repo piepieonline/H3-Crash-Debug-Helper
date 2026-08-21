@@ -36,6 +36,7 @@ configure_file(
 add_library(CrashDebugHelper SHARED
     src/CrashDebugHelper.cpp
     src/CrashDebugHelper.h
+    src/ZBitAlloc.h
 )
 
 # Set UTF-8 flag.

@@ -1,4 +1,7 @@
 #include "CrashDebugHelper.h"
+#include "ZBitAlloc.h"
+
+#include <atomic>
 
 #include <Globals.h>
 #include <Logging.h>
@@ -14,8 +17,34 @@ static const char* c_ArrayPushBackPattern =
 static const char* c_ArrayPushBackMask =
     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
+// Render primitive slot overflows
+//
+// Every IRenderPrimitive allocates a slot index from the render manager's ZBitAlloc and stores it in
+// m_BufferDataIndex. That index addresses Globals::PrimitiveBufferData, a fixed 65536-entry table.
+//
+// When the allocator is full the constructor leaves the index at its 0xFFFF failure sentinel - which is also a
+// *valid* slot index, so consumers cannot tell it apart from a real allocation and end up sharing slot 65535.
+
+// The render manager's unique-id allocator (m_PrimIds in the symbolled console builds), matched on the allocation
+// site inside IRenderPrimitive's constructor. The stock SDK has no Globals::PrimitiveBufferIds, so resolve it here.
+static const char* c_PrimitiveBufferIdsPattern = "\x48\x8D\x0D\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x8B\x5C\x24\x60";
+static const char* c_PrimitiveBufferIdsMask = "xxx????x????xxxx";
+static const ptrdiff_t c_PrimitiveBufferIdsOffset = 3;
+
+// IRenderPrimitive::IRenderPrimitive. Unlike everything else here this is an absolute IDA address that gets
+// rebased at runtime - there is no SDK hook for it and no pattern worked out yet, so it needs revisiting whenever
+// the game updates.
+static const uintptr_t c_IdaImageBase = 0x140000000;
+static const uintptr_t c_PrimitiveCtorAddr = 0x14119E780;
+
+static ZBitAlloc* g_PrimitiveBufferIds = nullptr;
+
+// How many times the constructor has run while the allocator was already at (or over) capacity.
+static std::atomic<uint32_t> g_PrimitiveExcessCount = 0;
+
 CrashDebugHelper* CrashDebugHelper::instance = nullptr;
 CrashDebugHelper::ZArray_PushBack_t CrashDebugHelper::originalArrayPushBack = nullptr;
+CrashDebugHelper::PrimitiveCtor_t CrashDebugHelper::originalPrimitiveCtor = nullptr;
 
 static void FlushLoggers()
 {
@@ -91,11 +120,78 @@ static void* FindGameFunction(const char* pattern, const char* mask)
     ));
 }
 
+// SDK's PatternGlobalRelative clone - finds an instruction that references a global via a rel32 displacement,
+// then resolves that displacement to the global's address
+static void* FindGameGlobal(const char* pattern, const char* mask, ptrdiff_t offset)
+{
+    const auto match = reinterpret_cast<uintptr_t>(FindGameFunction(pattern, mask));
+
+    if (match == 0)
+    {
+        return nullptr;
+    }
+
+    const uintptr_t relAddrPtr = match + offset;
+    const int32_t relAddr = *reinterpret_cast<int32_t*>(relAddrPtr);
+
+    return reinterpret_cast<void*>(relAddrPtr + relAddr + sizeof(int32_t));
+}
+
+static uintptr_t Rebase(uintptr_t idaAddress)
+{
+    const auto moduleBase = reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
+
+    return moduleBase + (idaAddress - c_IdaImageBase);
+}
+
+// We have our own copy of MinHook, separate from the SDK's. That's fine as long as the two never hook the same
+// function. Both of our hooks share the one instance, so it is only torn down once the last of them is gone.
+static int g_MinHookUsers = 0;
+
+static bool AcquireMinHook()
+{
+    if (g_MinHookUsers == 0)
+    {
+        const MH_STATUS status = MH_Initialize();
+
+        if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED)
+        {
+            Logger::Error("CrashDebugHelper: Could not initialize MinHook. Error code: {}.", static_cast<int>(status));
+            return false;
+        }
+    }
+
+    ++g_MinHookUsers;
+
+    return true;
+}
+
+static void ReleaseMinHook()
+{
+    if (g_MinHookUsers == 0)
+    {
+        return;
+    }
+
+    if (--g_MinHookUsers == 0)
+    {
+        MH_Uninitialize();
+    }
+}
+
 CrashDebugHelper::~CrashDebugHelper()
 {
     RemoveArrayPushBackHook();
+    RemovePrimitiveOverflowHook();
 
     instance = nullptr;
+}
+
+void CrashDebugHelper::Init()
+{
+    // Both of these need to be in place before the first scene loads, which is well before OnEngineInitialized
+    Hooks::ZEntitySceneContext_SetLoadingStage->AddDetour(this, &CrashDebugHelper::ZEntitySceneContext_SetLoadingStage);
+    InstallPrimitiveOverflowHook();
 }
 
 void CrashDebugHelper::OnEngineInitialized() {
@@ -186,12 +282,8 @@ void CrashDebugHelper::InstallArrayPushBackHook()
         return;
     }
 
-    // We have our own copy of MinHook, separate from the SDK's. That's fine as long as the two never hook the same function
-    const MH_STATUS initStatus = MH_Initialize();
-
-    if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED)
+    if (!AcquireMinHook())
     {
-        Logger::Error("CrashDebugHelper: Could not initialize MinHook. Error code: {}.", static_cast<int>(initStatus));
         return;
     }
 
@@ -204,7 +296,7 @@ void CrashDebugHelper::InstallArrayPushBackHook()
     if (status != MH_OK)
     {
         Logger::Error("CrashDebugHelper: Could not create the ZArray::push_back hook at {}. Error code: {}.", fmt::ptr(target), static_cast<int>(status));
-        MH_Uninitialize();
+        ReleaseMinHook();
         return;
     }
 
@@ -214,7 +306,7 @@ void CrashDebugHelper::InstallArrayPushBackHook()
     {
         Logger::Error("CrashDebugHelper: Could not enable the ZArray::push_back hook at {}. Error code: {}.", fmt::ptr(target), static_cast<int>(status));
         MH_RemoveHook(target);
-        MH_Uninitialize();
+        ReleaseMinHook();
         return;
     }
 
@@ -232,7 +324,7 @@ void CrashDebugHelper::RemoveArrayPushBackHook()
 
     MH_DisableHook(arrayPushBackTarget);
     MH_RemoveHook(arrayPushBackTarget);
-    MH_Uninitialize();
+    ReleaseMinHook();
 
     arrayPushBackTarget = nullptr;
 }
@@ -273,6 +365,117 @@ void CrashDebugHelper::OnArrayPushBack(void* th, void* newData)
         }
         mostRecentTemplate = -1;
     }
+}
+
+// Render Primitive Crashes
+// Too many render primitives in a scene, overflowing the fixed slot table
+
+void CrashDebugHelper::InstallPrimitiveOverflowHook()
+{
+    g_PrimitiveBufferIds = static_cast<ZBitAlloc*>(
+        FindGameGlobal(c_PrimitiveBufferIdsPattern, c_PrimitiveBufferIdsMask, c_PrimitiveBufferIdsOffset)
+    );
+
+    if (g_PrimitiveBufferIds == nullptr)
+    {
+        Logger::Error("CrashDebugHelper: Could not find the render primitive id allocator. Primitive overflow detection is disabled - the pattern probably needs updating for this version of the game.");
+        return;
+    }
+
+    Logger::Debug("CrashDebugHelper: Render primitive id allocator at {}, {}/{} slots used.", fmt::ptr(g_PrimitiveBufferIds), g_PrimitiveBufferIds->m_nUsed, g_PrimitiveBufferIds->m_nCapacity);
+
+    if (Globals::PrimitiveBufferData != nullptr)
+    {
+        Logger::Debug("CrashDebugHelper: Render primitive buffer table at {}.", fmt::ptr(Globals::PrimitiveBufferData));
+    }
+
+    if (!AcquireMinHook())
+    {
+        return;
+    }
+
+    void* target = reinterpret_cast<void*>(Rebase(c_PrimitiveCtorAddr));
+
+    MH_STATUS status = MH_CreateHook(
+        target,
+        reinterpret_cast<LPVOID>(&CrashDebugHelper::PrimitiveCtorDetour),
+        reinterpret_cast<LPVOID*>(&originalPrimitiveCtor)
+    );
+
+    if (status != MH_OK)
+    {
+        Logger::Error("CrashDebugHelper: Could not create the IRenderPrimitive constructor hook at {}. Error code: {}.", fmt::ptr(target), static_cast<int>(status));
+        ReleaseMinHook();
+        return;
+    }
+
+    status = MH_EnableHook(target);
+
+    if (status != MH_OK)
+    {
+        Logger::Error("CrashDebugHelper: Could not enable the IRenderPrimitive constructor hook at {}. Error code: {}.", fmt::ptr(target), static_cast<int>(status));
+        MH_RemoveHook(target);
+        ReleaseMinHook();
+        return;
+    }
+
+    primitiveCtorTarget = target;
+
+    Logger::Debug("CrashDebugHelper: Hooked the IRenderPrimitive constructor at {}.", fmt::ptr(target));
+}
+
+void CrashDebugHelper::RemovePrimitiveOverflowHook()
+{
+    if (primitiveCtorTarget == nullptr)
+    {
+        return;
+    }
+
+    MH_DisableHook(primitiveCtorTarget);
+    MH_RemoveHook(primitiveCtorTarget);
+    ReleaseMinHook();
+
+    primitiveCtorTarget = nullptr;
+}
+
+uintptr_t __fastcall CrashDebugHelper::PrimitiveCtorDetour(uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4)
+{
+    if (g_PrimitiveBufferIds != nullptr)
+    {
+        const auto used = g_PrimitiveBufferIds->m_nUsed;
+        const auto capacity = g_PrimitiveBufferIds->m_nCapacity;
+
+        if (used >= capacity)
+        {
+            const uint32_t excess = g_PrimitiveExcessCount.fetch_add(1) + 1;
+
+            Logger::Error("CRASH LIKELY: Excess render primitive ({} + {})/{} - slot 0xFFFF is being shared", used, excess, capacity);
+
+            // Only worth paying for on the first one - after that the scene is already doomed and this can fire
+            // thousands of times
+            if (excess == 1)
+            {
+                FlushLoggers();
+            }
+        }
+    }
+
+    return originalPrimitiveCtor(a1, a2, a3, a4);
+}
+
+DEFINE_PLUGIN_DETOUR(CrashDebugHelper, void, ZEntitySceneContext_SetLoadingStage, ZEntitySceneContext* th, ESceneLoadingStage stage) {
+    if (stage == ESceneLoadingStage::eLoading_Start)
+    {
+        // Start counting overflows fresh for the scene that's about to load
+        g_PrimitiveExcessCount = 0;
+    }
+
+    if (stage == ESceneLoadingStage::eLoading_ScenePlaying && g_PrimitiveBufferIds != nullptr)
+    {
+        Logger::Info("Scene finished loading. Render primitive slots: {}/{} filled, {} overflow(s).", g_PrimitiveBufferIds->m_nUsed, g_PrimitiveBufferIds->m_nCapacity, g_PrimitiveExcessCount.load());
+    }
+
+    return HookResult<void>(HookAction::Continue());
 }
 
 DECLARE_ZHM_PLUGIN(CrashDebugHelper);
