@@ -4,6 +4,7 @@
     "dependencies": [
         "directx-headers",
         "directxtk12",
+        "implot",
         "minhook"
     ]
 }
