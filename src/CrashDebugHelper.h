@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Glacier/ZScene.h>
+#include <Glacier/EntityFactory.h>
 
 #include <IPluginInterface.h>
 
@@ -14,6 +15,11 @@ public:
 private:
     DECLARE_PLUGIN_DETOUR(CrashDebugHelper, bool, OnLoadScene, ZEntitySceneContext*, SSceneInitParameters&);
     DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void, ZEntitySceneContext_SetLoadingStage, ZEntitySceneContext*, ESceneLoadingStage);
+
+    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void, ZTemplateEntityFactory_ConfigureEntity, ZTemplateEntityFactory*, ZEntityType**, const SExternalReferences&, uint8_t*);
+    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void, ZAspectEntityFactory_ConfigureEntity, ZAspectEntityFactory*, ZEntityType**, const SExternalReferences&, uint8_t*);
+    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void, ZCppEntityFactory_ConfigureEntity, ZCppEntityFactory*, ZEntityType**, const SExternalReferences&, uint8_t*);
+    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void, ZRenderMaterialEntityFactory_ConfigureEntity, ZRenderMaterialEntityFactory*, ZEntityType**, const SExternalReferences&, uint8_t*);
 
     void SceneLoadCrashHandler();
     bool LogInvalidSceneTemps(ZRuntimeResourceID resourceID, ZString ridPath, std::vector<std::string>* outputMessageList);
@@ -41,6 +47,9 @@ private:
     void* primitiveCtorTarget = nullptr;
 
     int mostRecentTemplate = -1;
+
+    bool engineInitialized = false;
+    bool templateHookAdded = false;
 };
 
 DEFINE_ZHM_PLUGIN(CrashDebugHelper)
