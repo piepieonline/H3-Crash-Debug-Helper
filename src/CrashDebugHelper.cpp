@@ -4,6 +4,7 @@
 #include <atomic>
 
 #include <Globals.h>
+#include <IconsMaterialDesign.h>
 #include <Logging.h>
 
 #include <Glacier/ZEntityManager.h>
@@ -221,6 +222,35 @@ void CrashDebugHelper::OnEngineInitialized() {
     Hooks::ZEntitySceneContext_LoadScene->AddDetour(this, &CrashDebugHelper::OnLoadScene);
     InstallArrayPushBackHook();
     InstallSaveEntityRefHook();
+}
+
+void CrashDebugHelper::OnDrawMenu()
+{
+    if (ImGui::Button(ICON_MD_BUG_REPORT " CRASH HELPER"))
+    {
+        showWindow = !showWindow;
+    }
+}
+
+void CrashDebugHelper::OnDrawUI(bool p_HasFocus)
+{
+    if (!p_HasFocus || !showWindow)
+    {
+        return;
+    }
+
+    const ImVec2 viewportSize = ImGui::GetMainViewport()->Size;
+    ImGui::SetNextWindowSize(ImVec2(viewportSize.x * 0.16f, viewportSize.y * 0.08f), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin(ICON_MD_BUG_REPORT " Crash Debug Helper", &showWindow))
+    {
+        if (ImGui::Button(ICON_MD_SAVE " Flush logs"))
+        {
+            FlushLoggers();
+        }
+    }
+
+    ImGui::End();
 }
 
 // Scene Crashes

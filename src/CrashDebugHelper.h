@@ -10,6 +10,8 @@ public:
 
     void Init() override;
     void OnEngineInitialized() override;
+    void OnDrawMenu() override;
+    void OnDrawUI(bool p_HasFocus) override;
 
 private:
     DECLARE_PLUGIN_DETOUR(CrashDebugHelper, bool, OnLoadScene, ZEntitySceneContext*, SSceneInitParameters&);
@@ -49,6 +51,7 @@ private:
     void* updateSaveStatesTarget = nullptr;
 
     int mostRecentTemplate = -1;
+    bool showWindow = false;
 };
 
 DEFINE_ZHM_PLUGIN(CrashDebugHelper)
