@@ -10,6 +10,9 @@ public:
     void Install();
     void Remove();
 
+    // Costs a pass over the whole reference table on the save thread, so it is opt-in
+    void SetExtendedInfo(bool enabled);
+
 private:
     typedef void (__fastcall* ZSaveSystem_UpdateSaveStates_t)(uintptr_t saveSystem);
 

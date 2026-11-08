@@ -2,9 +2,20 @@
 
 #include "../HookUtils.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
+#include <map>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
+#include <Globals.h>
 #include <Logging.h>
+
+// ZEntity.h declares IEntityFactory, which EntityFactory.h uses without declaring
+#include <Glacier/ZEntity.h>
+#include <Glacier/EntityFactory.h>
 
 // Save handlers append every serialized entity ref (not deduplicated, unchecked) to a fixed table; overflow corrupts its count
 static const char* c_UpdateSaveStatesPattern =
@@ -19,6 +30,8 @@ static const uint32_t c_EntityRefTableCapacity = 400000;
 static const uint32_t c_EntityRefTableWarnPercent = 80;
 
 static const int c_SaveStateSerialize = 10;
+
+static std::atomic<bool> g_ExtendedSaveInfo = false;
 
 SaveEntityRefDetector::ZSaveSystem_UpdateSaveStates_t SaveEntityRefDetector::originalUpdateSaveStates = nullptr;
 
@@ -53,6 +66,155 @@ void SaveEntityRefDetector::Remove()
     RemoveMinHook(updateSaveStatesTarget);
 }
 
+void SaveEntityRefDetector::SetExtendedInfo(bool enabled)
+{
+    g_ExtendedSaveInfo = enabled;
+}
+
+// The reference table is not deduplicated, so the same entity can occupy a great many of its slots
+static std::string_view SaveEntityRefTypeName(uintptr_t refValue)
+{
+    const ZEntityRef ref(reinterpret_cast<ZEntityType**>(refValue));
+    const ZEntityImpl* entity = ref.GetEntity();
+
+    if (entity == nullptr)
+    {
+        return "<null entity>";
+    }
+
+    const ZEntityType* type = entity->GetType();
+
+    if (type == nullptr || type->m_pInterfaceData == nullptr || type->m_pInterfaceData->size() == 0)
+    {
+        return "<no interfaces>";
+    }
+
+    const STypeID* typeId = (*type->m_pInterfaceData)[0].m_Type;
+    const IType* typeInfo = typeId == nullptr ? nullptr : typeId->GetTypeInfo();
+
+    if (typeInfo == nullptr || typeInfo->pszTypeName == nullptr)
+    {
+        return "<no type name>";
+    }
+
+    return typeInfo->pszTypeName;
+}
+
+static std::string DescribeSaveEntityRef(uintptr_t refValue)
+{
+    const ZEntityRef ref(reinterpret_cast<ZEntityType**>(refValue));
+    const ZEntityImpl* entity = ref.GetEntity();
+    const ZEntityType* type = entity == nullptr ? nullptr : entity->GetType();
+
+    if (type == nullptr)
+    {
+        return fmt::format("{} ({})", SaveEntityRefTypeName(refValue), fmt::ptr(reinterpret_cast<void*>(refValue)));
+    }
+
+    const ZEntityRef owner = ref.GetBlueprintFactory() != nullptr ? ref : ref.GetClosestParentWithBlueprintFactory();
+    ZEntityBlueprintFactoryBase* factory = owner ? owner.GetBlueprintFactory() : nullptr;
+
+    std::string name = "?";
+    std::string blueprint = "?";
+
+    if (factory != nullptr)
+    {
+        blueprint = fmt::format("{:08X}{:08X}", factory->m_ridResource.m_IDHigh, factory->m_ridResource.m_IDLow);
+
+        if (*reinterpret_cast<void**>(factory) == Globals::ZTemplateEntityBlueprintFactory_vtbl)
+        {
+            const auto* templateBlueprint = static_cast<ZTemplateEntityBlueprintFactory*>(factory)->m_pTemplateEntityBlueprint;
+
+            if (templateBlueprint != nullptr)
+            {
+                for (const auto& subEntity : templateBlueprint->subEntities)
+                {
+                    if (subEntity.entityId == type->m_nEntityID)
+                    {
+                        name = subEntity.entityName.c_str();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    return fmt::format("{} [{}] id {:016X} in {}", name, SaveEntityRefTypeName(refValue), type->m_nEntityID, blueprint);
+}
+
+static void LogSaveEntityRefDuplication(uintptr_t entityRefTable, uint32_t used)
+{
+    const auto* entries = reinterpret_cast<const uintptr_t*>(entityRefTable);
+    const uint32_t count = std::min(used, c_EntityRefTableCapacity);
+
+    std::unordered_map<uintptr_t, uint32_t> refsPerEntity;
+    refsPerEntity.reserve(count);
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        ++refsPerEntity[entries[i]];
+    }
+
+    if (refsPerEntity.empty())
+    {
+        return;
+    }
+
+    Logger::Info("CrashDebugHelper: SAVE REF DUPLICATION: {} refs over {} distinct entities ({:.2f} refs per entity, {} slots wasted on repeats)",
+        count, refsPerEntity.size(), static_cast<double>(count) / refsPerEntity.size(), count - refsPerEntity.size());
+
+    std::map<uint32_t, uint32_t> entitiesPerRefCount;
+
+    for (const auto& [refValue, refCount] : refsPerEntity)
+    {
+        ++entitiesPerRefCount[refCount];
+    }
+
+    for (const auto& [refCount, entities] : entitiesPerRefCount)
+    {
+        const uint64_t slots = static_cast<uint64_t>(refCount) * entities;
+
+        Logger::Info("CrashDebugHelper:   {:>6} ref(s) each: {:>6} entities, {:>7} slots ({}%)", refCount, entities, slots, slots * 100 / count);
+    }
+
+    std::vector<std::pair<uintptr_t, uint32_t>> worstEntities(refsPerEntity.begin(), refsPerEntity.end());
+    const size_t worstCount = std::min<size_t>(worstEntities.size(), 25);
+
+    std::partial_sort(worstEntities.begin(), worstEntities.begin() + worstCount, worstEntities.end(),
+        [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    Logger::Info("CrashDebugHelper: SAVE REF DUPLICATION: worst {} entities", worstCount);
+
+    for (size_t i = 0; i < worstCount; ++i)
+    {
+        Logger::Info("CrashDebugHelper:   {:>6} refs: {}", worstEntities[i].second, DescribeSaveEntityRef(worstEntities[i].first));
+    }
+
+    std::unordered_map<std::string_view, std::pair<uint32_t, uint32_t>> perType;
+
+    for (const auto& [refValue, refCount] : refsPerEntity)
+    {
+        auto& [entities, refs] = perType[SaveEntityRefTypeName(refValue)];
+        ++entities;
+        refs += refCount;
+    }
+
+    std::vector<std::pair<std::string_view, std::pair<uint32_t, uint32_t>>> worstTypes(perType.begin(), perType.end());
+    const size_t worstTypeCount = std::min<size_t>(worstTypes.size(), 25);
+
+    std::partial_sort(worstTypes.begin(), worstTypes.begin() + worstTypeCount, worstTypes.end(),
+        [](const auto& a, const auto& b) { return a.second.second > b.second.second; });
+
+    Logger::Info("CrashDebugHelper: SAVE REF DUPLICATION: worst {} of {} interface types", worstTypeCount, perType.size());
+
+    for (size_t i = 0; i < worstTypeCount; ++i)
+    {
+        const auto& [entities, refs] = worstTypes[i].second;
+
+        Logger::Info("CrashDebugHelper:   {:>7} refs over {:>6} entities ({:.2f} each): {}", refs, entities, static_cast<double>(refs) / entities, worstTypes[i].first);
+    }
+}
+
 void __fastcall SaveEntityRefDetector::ZSaveSystem_UpdateSaveStatesDetour(uintptr_t saveSystem)
 {
     const int stateBefore = *reinterpret_cast<int*>(saveSystem + c_SaveSystemStateOffset);
@@ -83,5 +245,11 @@ void __fastcall SaveEntityRefDetector::ZSaveSystem_UpdateSaveStatesDetour(uintpt
     else
     {
         Logger::Info("CrashDebugHelper: Save used {}/{} entity reference slots ({}%).", used, c_EntityRefTableCapacity, percent);
+    }
+
+    if (g_ExtendedSaveInfo)
+    {
+        LogSaveEntityRefDuplication(entityRefTable, used);
+        FlushLoggers();
     }
 }

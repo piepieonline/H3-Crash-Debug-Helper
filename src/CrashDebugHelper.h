@@ -21,6 +21,7 @@ private:
     SaveEntityRefDetector saveEntityRefDetector;
 
     bool showWindow = false;
+    bool extendedSaveInfo = false;
 };
 
 DEFINE_ZHM_PLUGIN(CrashDebugHelper)
