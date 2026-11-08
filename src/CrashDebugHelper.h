@@ -34,11 +34,19 @@ private:
     void RemovePrimitiveOverflowHook();
     static uintptr_t __fastcall PrimitiveCtorDetour(uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4);
 
+    typedef void (__fastcall* ZSaveSystem_UpdateSaveStates_t)(uintptr_t saveSystem);
+
+    void InstallSaveEntityRefHook();
+    void RemoveSaveEntityRefHook();
+    static void __fastcall ZSaveSystem_UpdateSaveStatesDetour(uintptr_t saveSystem);
+
     static CrashDebugHelper* instance;
     static ZArray_PushBack_t originalArrayPushBack;
     static PrimitiveCtor_t originalPrimitiveCtor;
+    static ZSaveSystem_UpdateSaveStates_t originalUpdateSaveStates;
     void* arrayPushBackTarget = nullptr;
     void* primitiveCtorTarget = nullptr;
+    void* updateSaveStatesTarget = nullptr;
 
     int mostRecentTemplate = -1;
 };

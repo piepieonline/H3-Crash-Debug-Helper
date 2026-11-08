@@ -12,10 +12,21 @@
 
 #include <MinHook.h>
 
+// ZArray::push_back - four instantiations share this prologue, so the pattern runs on to the element size that separates them
 static const char* c_ArrayPushBackPattern =
-    "\x40\x53\x57\x48\x83\xEC\x38\x48\x8B\xD9\x48\x89\x6C\x24\x58\x48\x89\x74\x24\x60\x48\x8B\xEA\x48\x8B\x71\x10\x48\x8B\xCE\x48\xC1\xE9\x3E\x80\xE1\x01\x74\x10\x48\x8B\xC6\x40\x0F\xB6\xFE\x48\xC1\xE8\x08\x0F\xB6\xD0\xEB\x24\x48\x8B\x7B\x08\x48\x8B\xD6\x48\x2B\x3B\x48\xB8\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x3F\x48\x23\xD0\x48\xC1\xFF\x03\x48\x2B\x13\x8B\xFF\x48\xC1\xFA\x03\x8B\xC2\x48\x3B\xF8";
+    "\x40\x53\x57\x48\x83\xEC\x38\x48\x8B\xD9\x48\x89\x6C\x24\x58\x48\x89\x74\x24\x60\x48\x8B\xEA\x48\x8B\x71\x10\x48\x8B\xCE\x48\xC1"
+    "\xE9\x3E\x80\xE1\x01\x74\x10\x48\x8B\xC6\x40\x0F\xB6\xFE\x48\xC1\xE8\x08\x0F\xB6\xD0\xEB\x24\x48\x8B\x7B\x08\x48\x8B\xD6\x48\x2B"
+    "\x3B\x48\xB8\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x3F\x48\x23\xD0\x48\xC1\xFF\x03\x48\x2B\x13\x8B\xFF\x48\xC1\xFA\x03\x8B\xC2\x48\x3B\xF8"
+    "\x0F\x85\x09\x01\x00\x00\x48\x8B\xC7\x4C\x89\x7C\x24\x30\x48\xC1\xE8\x02\x48\x8D\x57\x01\x48\x03\xD0\x4C\x8D\x3C\xD5\x00\x00\x00"
+    "\x00\x49\x83\xFF\x10\x77\x32\x84\xC9\x74\x2E\x48\x8B\x45\x00\x48\x89\x04\xFB\x48\x8D\x47\x01\x48\xC1\xE2\x08\x48\x0B\xD0\x48\x8B"
+    "\x43\x10\x48\x25\x00\x00\xFF\xFF\x48\x0B\xD0\x48\x89\x53\x10\x4C\x8B\x7C\x24\x30\xE9\xFD\x00\x00\x00\x48\xB8\x00\x00\x00\x00\x00"
+    "\x00\x00\xC0\x4C\x89\x74\x24\x68\x45\x33\xF6\x48\x23\xF0\x66\x44\x89\x74\x24\x50\xE8\x87\x31\xFC\xFF\x4C\x8D\x4C\x24\x50\x4C\x89"
+    "\x74\x24\x20\x45\x8D\x46\x08";
 static const char* c_ArrayPushBackMask =
-    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx????xxxxxxxxxxxxxxxxxxxxxxxxxx"
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx????xxxxxxx"
+    "xxxxxxxxxxxxxxxxxxxxx????xxxxxxxxxxxxxx";
 
 // Render primitive slot overflows
 //
@@ -31,13 +42,26 @@ static const char* c_PrimitiveBufferIdsPattern = "\x48\x8D\x0D\x00\x00\x00\x00\x
 static const char* c_PrimitiveBufferIdsMask = "xxx????x????xxxx";
 static const ptrdiff_t c_PrimitiveBufferIdsOffset = 3;
 
-// IRenderPrimitive::IRenderPrimitive. Unlike everything else here this is an absolute IDA address that gets
-// rebased at runtime - there is no SDK hook for it and no pattern worked out yet, so it needs revisiting whenever
-// the game updates.
-static const uintptr_t c_IdaImageBase = 0x140000000;
-static const uintptr_t c_PrimitiveCtorAddr = 0x14119E780;
+// IRenderPrimitive::IRenderPrimitive, matched on its prologue with the rel32 to its vtable wildcarded
+static const char* c_PrimitiveCtorPattern =
+    "\x48\x89\x5C\x24\x10\x57\x48\x83\xEC\x50\x48\x8B\xF9\xC7\x41\x08\x01\x00\x00\x00\x48\x8D\x05\x7D\xF6\xD6\x00\x0F\x29\x74\x24\x40";
+static const char* c_PrimitiveCtorMask = "xxxxxxxxxxxxxxxxxxxxxxx????xxxxx";
 
 static ZBitAlloc* g_PrimitiveBufferIds = nullptr;
+
+// Save handlers append every serialized entity ref (not deduplicated, unchecked) to a fixed table; overflow corrupts its count
+static const char* c_UpdateSaveStatesPattern =
+    "\x40\x55\x53\x56\x57\x41\x54\x41\x56\x41\x57\x48\x8D\x6C\x24\xF0\x48\x81\xEC\x10\x01\x00\x00\x8B\x81\x80\x01\x00\x00\x48\x8B\xF9\x83\xF8\x0A\x0F\x85\x00\x00\x00\x00\x33\xF6";
+static const char* c_UpdateSaveStatesMask = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx????xx";
+
+static const ptrdiff_t c_SaveSystemStateOffset = 0x180;
+static const ptrdiff_t c_SaveSystemJobOffset = 0x148;
+static const ptrdiff_t c_SaveJobEntityRefTableOffset = 0x160;
+static const ptrdiff_t c_EntityRefTableCountOffset = 3200000;
+static const uint32_t c_EntityRefTableCapacity = 400000;
+static const uint32_t c_EntityRefTableWarnPercent = 80;
+
+static const int c_SaveStateSerialize = 10;
 
 // How many times the constructor has run while the allocator was already at (or over) capacity.
 static std::atomic<uint32_t> g_PrimitiveExcessCount = 0;
@@ -45,6 +69,7 @@ static std::atomic<uint32_t> g_PrimitiveExcessCount = 0;
 CrashDebugHelper* CrashDebugHelper::instance = nullptr;
 CrashDebugHelper::ZArray_PushBack_t CrashDebugHelper::originalArrayPushBack = nullptr;
 CrashDebugHelper::PrimitiveCtor_t CrashDebugHelper::originalPrimitiveCtor = nullptr;
+CrashDebugHelper::ZSaveSystem_UpdateSaveStates_t CrashDebugHelper::originalUpdateSaveStates = nullptr;
 
 static void FlushLoggers()
 {
@@ -137,13 +162,6 @@ static void* FindGameGlobal(const char* pattern, const char* mask, ptrdiff_t off
     return reinterpret_cast<void*>(relAddrPtr + relAddr + sizeof(int32_t));
 }
 
-static uintptr_t Rebase(uintptr_t idaAddress)
-{
-    const auto moduleBase = reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
-
-    return moduleBase + (idaAddress - c_IdaImageBase);
-}
-
 // We have our own copy of MinHook, separate from the SDK's. That's fine as long as the two never hook the same
 // function. Both of our hooks share the one instance, so it is only torn down once the last of them is gone.
 static int g_MinHookUsers = 0;
@@ -183,6 +201,7 @@ CrashDebugHelper::~CrashDebugHelper()
 {
     RemoveArrayPushBackHook();
     RemovePrimitiveOverflowHook();
+    RemoveSaveEntityRefHook();
 
     instance = nullptr;
 }
@@ -195,12 +214,13 @@ void CrashDebugHelper::Init()
 }
 
 void CrashDebugHelper::OnEngineInitialized() {
-    Logger::Info("CrashDebugHelper has been initialized!");
+    Logger::Info("CrashDebugHelper: Initialized!");
 
     instance = this;
 
     Hooks::ZEntitySceneContext_LoadScene->AddDetour(this, &CrashDebugHelper::OnLoadScene);
     InstallArrayPushBackHook();
+    InstallSaveEntityRefHook();
 }
 
 // Scene Crashes
@@ -240,10 +260,10 @@ void CrashDebugHelper::SceneLoadCrashHandler()
 
     if (wasErrorFound)
     {
-        Logger::Error("SCENE OR BRICK CRASH");
+        Logger::Error("CrashDebugHelper: SCENE OR BRICK CRASH");
         for (auto message : *messageList)
         {
-            Logger::Info("{}", message);
+            Logger::Info("CrashDebugHelper: {}", message);
         }
     }
 
@@ -360,7 +380,7 @@ void CrashDebugHelper::OnArrayPushBack(void* th, void* newData)
             auto entity = reinterpret_cast<STemplateBlueprintSubEntity*>((uintptr_t*)((char*)newData - 0x28));
             auto rootEntName = factoryCall2->m_pTemplateEntityBlueprint->subEntities[factoryCall2->m_pTemplateEntityBlueprint->rootEntityIndex].entityName;
             auto rootEntId = factoryCall2->m_pTemplateEntityBlueprint->subEntities[factoryCall2->m_pTemplateEntityBlueprint->rootEntityIndex].entityId;
-            Logger::Error("CRASH LIKELY: Missing entity template: {} ({:X}) - Scene Blueprint {:08X}{:08X} (Root Entity {} ({:X}))", entity->entityName, entity->entityId, factoryCall2->m_ridResource.m_IDHigh, factoryCall2->m_ridResource.m_IDLow, rootEntName, rootEntId);
+            Logger::Error("CrashDebugHelper: CRASH LIKELY: Missing entity template: {} ({:X}) - Scene Blueprint {:08X}{:08X} (Root Entity {} ({:X}))", entity->entityName, entity->entityId, factoryCall2->m_ridResource.m_IDHigh, factoryCall2->m_ridResource.m_IDLow, rootEntName, rootEntId);
             FlushLoggers();
         }
         mostRecentTemplate = -1;
@@ -389,12 +409,18 @@ void CrashDebugHelper::InstallPrimitiveOverflowHook()
         Logger::Debug("CrashDebugHelper: Render primitive buffer table at {}.", fmt::ptr(Globals::PrimitiveBufferData));
     }
 
+    void* target = FindGameFunction(c_PrimitiveCtorPattern, c_PrimitiveCtorMask);
+
+    if (target == nullptr)
+    {
+        Logger::Error("CrashDebugHelper: Could not find the IRenderPrimitive constructor. Primitive overflow detection is disabled - the pattern probably needs updating for this version of the game.");
+        return;
+    }
+
     if (!AcquireMinHook())
     {
         return;
     }
-
-    void* target = reinterpret_cast<void*>(Rebase(c_PrimitiveCtorAddr));
 
     MH_STATUS status = MH_CreateHook(
         target,
@@ -449,7 +475,7 @@ uintptr_t __fastcall CrashDebugHelper::PrimitiveCtorDetour(uintptr_t a1, uintptr
         {
             const uint32_t excess = g_PrimitiveExcessCount.fetch_add(1) + 1;
 
-            Logger::Error("CRASH LIKELY: Excess render primitive ({} + {})/{} - slot 0xFFFF is being shared", used, excess, capacity);
+            Logger::Error("CrashDebugHelper: CRASH LIKELY: Excess render primitive ({} + {})/{} - slot 0xFFFF is being shared", used, excess, capacity);
 
             // Only worth paying for on the first one - after that the scene is already doomed and this can fire
             // thousands of times
@@ -463,6 +489,99 @@ uintptr_t __fastcall CrashDebugHelper::PrimitiveCtorDetour(uintptr_t a1, uintptr
     return originalPrimitiveCtor(a1, a2, a3, a4);
 }
 
+// Save Crashes
+// Too many entity references serialized in one save, overflowing the fixed reference table
+
+void CrashDebugHelper::InstallSaveEntityRefHook()
+{
+    void* target = FindGameFunction(c_UpdateSaveStatesPattern, c_UpdateSaveStatesMask);
+
+    if (target == nullptr)
+    {
+        Logger::Error("CrashDebugHelper: Could not find ZSaveSystem's save state update. Save entity reference reporting is disabled - the pattern probably needs updating for this version of the game.");
+        return;
+    }
+
+    if (!AcquireMinHook())
+    {
+        return;
+    }
+
+    MH_STATUS status = MH_CreateHook(
+        target,
+        reinterpret_cast<LPVOID>(&CrashDebugHelper::ZSaveSystem_UpdateSaveStatesDetour),
+        reinterpret_cast<LPVOID*>(&originalUpdateSaveStates)
+    );
+
+    if (status != MH_OK)
+    {
+        Logger::Error("CrashDebugHelper: Could not create the ZSaveSystem save state hook at {}. Error code: {}.", fmt::ptr(target), static_cast<int>(status));
+        ReleaseMinHook();
+        return;
+    }
+
+    status = MH_EnableHook(target);
+
+    if (status != MH_OK)
+    {
+        Logger::Error("CrashDebugHelper: Could not enable the ZSaveSystem save state hook at {}. Error code: {}.", fmt::ptr(target), static_cast<int>(status));
+        MH_RemoveHook(target);
+        ReleaseMinHook();
+        return;
+    }
+
+    updateSaveStatesTarget = target;
+
+    Logger::Debug("CrashDebugHelper: Hooked ZSaveSystem's save state update at {}.", fmt::ptr(target));
+}
+
+void CrashDebugHelper::RemoveSaveEntityRefHook()
+{
+    if (updateSaveStatesTarget == nullptr)
+    {
+        return;
+    }
+
+    MH_DisableHook(updateSaveStatesTarget);
+    MH_RemoveHook(updateSaveStatesTarget);
+    ReleaseMinHook();
+
+    updateSaveStatesTarget = nullptr;
+}
+
+void __fastcall CrashDebugHelper::ZSaveSystem_UpdateSaveStatesDetour(uintptr_t saveSystem)
+{
+    const int stateBefore = *reinterpret_cast<int*>(saveSystem + c_SaveSystemStateOffset);
+
+    originalUpdateSaveStates(saveSystem);
+
+    if (stateBefore != c_SaveStateSerialize)
+    {
+        return;
+    }
+
+    const uintptr_t saveJob = *reinterpret_cast<uintptr_t*>(saveSystem + c_SaveSystemJobOffset);
+    const uintptr_t entityRefTable = saveJob == 0 ? 0 : *reinterpret_cast<uintptr_t*>(saveJob + c_SaveJobEntityRefTableOffset);
+
+    if (entityRefTable == 0)
+    {
+        return;
+    }
+
+    const uint32_t used = *reinterpret_cast<uint32_t*>(entityRefTable + c_EntityRefTableCountOffset);
+    const uint32_t percent = static_cast<uint32_t>(static_cast<uint64_t>(used) * 100 / c_EntityRefTableCapacity);
+
+    if (used >= c_EntityRefTableWarnPercent * (c_EntityRefTableCapacity / 100))
+    {
+        Logger::Warn("CrashDebugHelper: SAVE CRASH LIKELY SOON: Save used {}/{} entity reference slots ({}%). Saving past {} crashes the game.", used, c_EntityRefTableCapacity, percent, c_EntityRefTableCapacity);
+        FlushLoggers();
+    }
+    else
+    {
+        Logger::Info("CrashDebugHelper: Save used {}/{} entity reference slots ({}%).", used, c_EntityRefTableCapacity, percent);
+    }
+}
+
 DEFINE_PLUGIN_DETOUR(CrashDebugHelper, void, ZEntitySceneContext_SetLoadingStage, ZEntitySceneContext* th, ESceneLoadingStage stage) {
     if (stage == ESceneLoadingStage::eLoading_Start)
     {
@@ -472,7 +591,7 @@ DEFINE_PLUGIN_DETOUR(CrashDebugHelper, void, ZEntitySceneContext_SetLoadingStage
 
     if (stage == ESceneLoadingStage::eLoading_ScenePlaying && g_PrimitiveBufferIds != nullptr)
     {
-        Logger::Info("Scene finished loading. Render primitive slots: {}/{} filled, {} overflow(s).", g_PrimitiveBufferIds->m_nUsed, g_PrimitiveBufferIds->m_nCapacity, g_PrimitiveExcessCount.load());
+        Logger::Info("CrashDebugHelper: Scene finished loading. Render primitive slots: {}/{} filled, {} overflow(s).", g_PrimitiveBufferIds->m_nUsed, g_PrimitiveBufferIds->m_nCapacity, g_PrimitiveExcessCount.load());
     }
 
     return HookResult<void>(HookAction::Continue());
