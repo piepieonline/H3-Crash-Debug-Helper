@@ -36,7 +36,17 @@ configure_file(
 add_library(CrashDebugHelper SHARED
     src/CrashDebugHelper.cpp
     src/CrashDebugHelper.h
-    src/ZBitAlloc.h
+    src/HookUtils.cpp
+    src/HookUtils.h
+    src/detectors/MissingTemplateDetector.cpp
+    src/detectors/MissingTemplateDetector.h
+    src/detectors/PrimitiveOverflowDetector.cpp
+    src/detectors/PrimitiveOverflowDetector.h
+    src/detectors/SaveEntityRefDetector.cpp
+    src/detectors/SaveEntityRefDetector.h
+    src/detectors/SceneLoadDetector.cpp
+    src/detectors/SceneLoadDetector.h
+    src/detectors/ZBitAlloc.h
 )
 
 # Set UTF-8 flag.

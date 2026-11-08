@@ -1,56 +1,25 @@
 #pragma once
 
-#include <Glacier/ZScene.h>
-
 #include <IPluginInterface.h>
+
+#include "detectors/MissingTemplateDetector.h"
+#include "detectors/PrimitiveOverflowDetector.h"
+#include "detectors/SaveEntityRefDetector.h"
+#include "detectors/SceneLoadDetector.h"
 
 class CrashDebugHelper : public IPluginInterface {
 public:
-    ~CrashDebugHelper() override;
-
     void Init() override;
     void OnEngineInitialized() override;
     void OnDrawMenu() override;
     void OnDrawUI(bool p_HasFocus) override;
 
 private:
-    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, bool, OnLoadScene, ZEntitySceneContext*, SSceneInitParameters&);
-    DECLARE_PLUGIN_DETOUR(CrashDebugHelper, void, ZEntitySceneContext_SetLoadingStage, ZEntitySceneContext*, ESceneLoadingStage);
+    SceneLoadDetector sceneLoadDetector;
+    MissingTemplateDetector missingTemplateDetector;
+    PrimitiveOverflowDetector primitiveOverflowDetector;
+    SaveEntityRefDetector saveEntityRefDetector;
 
-    void SceneLoadCrashHandler();
-    bool LogInvalidSceneTemps(ZRuntimeResourceID resourceID, ZString ridPath, std::vector<std::string>* outputMessageList);
-
-    typedef void* (__fastcall* ZArray_PushBack_t)(void* th, void* newData);
-
-    void InstallArrayPushBackHook();
-    void RemoveArrayPushBackHook();
-    void OnArrayPushBack(void* th, void* newData);
-    static void* __fastcall ZArray_PushBackDetour(void* th, void* newData);
-
-    // Passing through 4 integer arguments covers any function that takes up to 4
-    // integer / pointer arguments, and returning the original's result keeps the
-    // return value intact regardless of what the real signature is.
-    typedef uintptr_t (__fastcall* PrimitiveCtor_t)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-
-    void InstallPrimitiveOverflowHook();
-    void RemovePrimitiveOverflowHook();
-    static uintptr_t __fastcall PrimitiveCtorDetour(uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4);
-
-    typedef void (__fastcall* ZSaveSystem_UpdateSaveStates_t)(uintptr_t saveSystem);
-
-    void InstallSaveEntityRefHook();
-    void RemoveSaveEntityRefHook();
-    static void __fastcall ZSaveSystem_UpdateSaveStatesDetour(uintptr_t saveSystem);
-
-    static CrashDebugHelper* instance;
-    static ZArray_PushBack_t originalArrayPushBack;
-    static PrimitiveCtor_t originalPrimitiveCtor;
-    static ZSaveSystem_UpdateSaveStates_t originalUpdateSaveStates;
-    void* arrayPushBackTarget = nullptr;
-    void* primitiveCtorTarget = nullptr;
-    void* updateSaveStatesTarget = nullptr;
-
-    int mostRecentTemplate = -1;
     bool showWindow = false;
 };
 
