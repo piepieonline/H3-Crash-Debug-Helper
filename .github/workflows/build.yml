@@ -3,7 +3,7 @@ name: Build
 on:
   push:
   release:
-    types: [ created ]
+    types: [ published ]
   pull_request:
     types: [ opened, synchronize, reopened ]
 
@@ -68,49 +68,36 @@ jobs:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
 
-    steps:
-    - name: Download debug artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: CrashDebugHelper-Debug
-        path: CrashDebugHelper-Debug
+    permissions:
+      contents: write
 
-    - name: Download release artifact
+    steps:
+    - name: Download build artifacts
       uses: actions/download-artifact@v4
       with:
-        name: CrashDebugHelper-Release
-        path: CrashDebugHelper-Release
+        path: _artifacts
 
     - name: Archive artifact files
       run: |
-        cd CrashDebugHelper-Debug
-        zip -r CrashDebugHelper-Debug.zip *
-        cd ../CrashDebugHelper-Release
-        zip -r CrashDebugHelper-Release.zip *
-        
-    - name: Get release
-      id: get_release
-      uses: bruceadams/get-release@v1.2.2
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-
-    - name: Upload debug assets
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.get_release.outputs.upload_url }}
-        asset_path: CrashDebugHelper-Debug/CrashDebugHelper-Debug.zip
-        asset_name: CrashDebugHelper-Debug.zip
-        asset_content_type: application/zip
+        mkdir _dist
+        for dir in _artifacts/*/; do
+          (cd "$dir" && zip -r "$GITHUB_WORKSPACE/_dist/$(basename "$dir").zip" .)
+        done
 
     - name: Upload release assets
-      uses: actions/upload-release-asset@v1
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.get_release.outputs.upload_url }}
-        asset_path: CrashDebugHelper-Release/CrashDebugHelper-Release.zip
-        asset_name: CrashDebugHelper-Release.zip
-        asset_content_type: application/zip
-
+        GH_TOKEN: ${{ github.token }}
+        RELEASE_ID: ${{ github.event.release.id }}
+      run: |
+        for asset in _dist/*.zip; do
+          name=$(basename "$asset")
+          # Re-running a release build has to replace the asset, uploading a duplicate name fails
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
+            --jq ".[] | select(.name == \"$name\") | .id" | while read -r id; do
+            gh api --method DELETE --silent "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets/$id"
+          done
+          gh api --method POST --silent \
+            -H "Content-Type: application/zip" \
+            --input "$asset" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$name"
+        done
