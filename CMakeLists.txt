@@ -38,6 +38,8 @@ add_library(CrashDebugHelper SHARED
     src/CrashDebugHelper.h
     src/HookUtils.cpp
     src/HookUtils.h
+    src/ResourceNames.cpp
+    src/ResourceNames.h
     src/detectors/MissingTemplateDetector.cpp
     src/detectors/MissingTemplateDetector.h
     src/detectors/PrimitiveOverflowDetector.cpp
@@ -63,6 +65,7 @@ target_link_libraries(CrashDebugHelper
     Microsoft::DirectX-Guids
     Microsoft::DirectX-Headers
     version
+    winhttp
 )
 
 install(TARGETS CrashDebugHelper

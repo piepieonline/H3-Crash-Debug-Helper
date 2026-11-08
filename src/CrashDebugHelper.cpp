@@ -1,5 +1,6 @@
 #include "CrashDebugHelper.h"
 #include "HookUtils.h"
+#include "ResourceNames.h"
 
 #include <string_view>
 
@@ -17,6 +18,8 @@ void CrashDebugHelper::Init()
 
 void CrashDebugHelper::OnEngineInitialized() {
     Logger::Info("CrashDebugHelper: Initialized!");
+
+    ResourceNames::StartLoading();
 
     sceneLoadDetector.Install();
     missingTemplateDetector.Install();
