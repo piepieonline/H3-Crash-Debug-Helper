@@ -61,7 +61,6 @@ find_package(directx-headers CONFIG REQUIRED)
 
 target_link_libraries(CrashDebugHelper
     ZHMModSDK
-    implot
     minhook::minhook
     Microsoft::DirectXTK12
     Microsoft::DirectX-Guids
