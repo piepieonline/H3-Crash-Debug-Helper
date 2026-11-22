@@ -12,6 +12,9 @@ jobs:
     name: Build
     runs-on: [ windows-latest ]
 
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+
     steps:
     - name: Get latest CMake and ninja
       uses: lukka/get-cmake@latest
@@ -26,15 +29,29 @@ jobs:
       with:
         arch: x64
 
+    - name: Find latest ZHMModSDK master artifact
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        run_id=$(gh api "repos/OrfeasZ/ZHMModSDK/actions/workflows/build.yml/runs?branch=master&event=push&status=success&per_page=1" --jq '.workflow_runs[0].id')
+        artifact_id=$(gh api "repos/OrfeasZ/ZHMModSDK/actions/runs/$run_id/artifacts" --jq '.artifacts[] | select(.name == "DevPkg-ZHMModSDK" and .expired == false) | .id')
+        if [ -z "$artifact_id" ]; then
+          echo "::error::No DevPkg-ZHMModSDK artifact on ZHMModSDK master run $run_id"
+          exit 1
+        fi
+        echo "Using ZHMModSDK master run $run_id, artifact $artifact_id"
+        echo "ZHMMODSDK_ARTIFACT_ID=$artifact_id" >> "$GITHUB_ENV"
+
     - name: Build and install debug
       run: |
-        cmake --preset x64-Debug .
+        cmake --preset x64-Debug -DZHMMODSDK_ARTIFACT_ID="$env:ZHMMODSDK_ARTIFACT_ID" .
         cmake --build _build/x64-Debug --parallel
         cmake --install _build/x64-Debug
 
     - name: Build and install release
       run: |
-        cmake --preset x64-Release .
+        cmake --preset x64-Release -DZHMMODSDK_ARTIFACT_ID="$env:ZHMMODSDK_ARTIFACT_ID" .
         cmake --build _build/x64-Release --parallel
         cmake --install _build/x64-Release
 
