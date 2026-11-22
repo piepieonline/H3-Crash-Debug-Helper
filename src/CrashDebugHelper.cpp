@@ -23,6 +23,7 @@ void CrashDebugHelper::OnEngineInitialized() {
 
     sceneLoadDetector.Install();
     missingTemplateDetector.Install();
+    missingSubsetDetector.Install();
     extendedSaveInfo = GetSettingBool(c_SaveSettingsSection, c_ExtendedInfoSetting, false);
     saveEntityRefDetector.SetExtendedInfo(extendedSaveInfo);
     saveEntityRefDetector.Install();

@@ -40,6 +40,8 @@ add_library(CrashDebugHelper SHARED
     src/HookUtils.h
     src/ResourceNames.cpp
     src/ResourceNames.h
+    src/detectors/MissingSubsetDetector.cpp
+    src/detectors/MissingSubsetDetector.h
     src/detectors/MissingTemplateDetector.cpp
     src/detectors/MissingTemplateDetector.h
     src/detectors/PrimitiveOverflowDetector.cpp

@@ -2,6 +2,7 @@
 
 #include <IPluginInterface.h>
 
+#include "detectors/MissingSubsetDetector.h"
 #include "detectors/MissingTemplateDetector.h"
 #include "detectors/PrimitiveOverflowDetector.h"
 #include "detectors/SaveEntityRefDetector.h"
@@ -17,6 +18,7 @@ public:
 private:
     SceneLoadDetector sceneLoadDetector;
     MissingTemplateDetector missingTemplateDetector;
+    MissingSubsetDetector missingSubsetDetector;
     PrimitiveOverflowDetector primitiveOverflowDetector;
     SaveEntityRefDetector saveEntityRefDetector;
 
